@@ -1,53 +1,137 @@
+import random
 import numpy as np
 import time
 
 
-def ant_system_tsp(dist, ants=10, max_iter=100, rho=0.5, alpha=1, beta=5, q0=0.9):
-    # Inicialização dos feromônios
-    n = dist.shape[0]
-    tau = np.ones((n, n))
+class Ant:
+    def __init__(self, n):
+        self.n = n
+        self.position = np.zeros(n, dtype=int)
+        self.unplaced = list(range(n))
 
-    # Loop principal do algoritmo
-    best_cost = np.inf
-    best_solution = None
-    for it in range(max_iter):
-        # Inicialização das formigas
-        solutions = []
-        for ant in range(ants):
-            solution = [np.random.randint(n)]
-            visited = set(solution)
-            for _ in range(n-1):
-                p = tau[solution[-1], :] ** alpha * \
-                    (1.0 / (dist[solution[-1], :] + 1e-10)) ** beta
-                p[list(visited)] = 0.0
-                if np.random.rand() < q0:
-                    next_node = np.argmax(p)
-                else:
-                    p = p / p.sum()
-                    next_node = np.random.choice(range(n), p=p)
-                solution.append(next_node)
-                visited.add(next_node)
-            solutions.append(solution)
+    def place_queen(self, col):
+        row = random.choice(self.unplaced)
+        self.position[col] = row
+        self.unplaced.remove(row)
 
-        # Atualização dos feromônios
-        costs = np.array([sum(dist[solution[i], solution[i+1]] for i in range(n-1)) +
-                         dist[solution[-1], solution[0]] for solution in solutions])
-        if costs.min() < best_cost:
-            best_cost = costs.min()
-            best_solution = solutions[np.argmin(costs)]
-        pheromone_delta = np.zeros((n, n))
-        for solution in solutions:
-            for i in range(n-1):
-                pheromone_delta[solution[i], solution[i+1]
+    def fitness(self):
+        conflicts = 0
+        for i in range(self.n):
+            for j in range(i + 1, self.n):
+                if self.position[i] == self.position[j] or abs(i - j) == abs(self.position[i] - self.position[j]):
+                    conflicts += 1
+        return conflicts
+
+
+class AntSystem:
+    def __init__(self, n, num_ants, alpha, beta, evaporation_rate, Q):
+        self.n = n
+        self.num_ants = num_ants
+        self.alpha = alpha
+        self.beta = beta
+        self.evaporation_rate = evaporation_rate
+        self.Q = Q
+        self.pheromone = np.ones((n, n)) / n
+        self.best_ant = None
+
+    def run(self, num_iterations):
+        for iteration in range(num_iterations):
+            ants = [Ant(self.n) for i in range(self.num_ants)]
+            for ant in ants:
+                self.place_queens(ant)
+            self.update_pheromone(ants)
+            best_ant = min(ants, key=lambda ant: ant.fitness())
+            if self.best_ant is None or best_ant.fitness() < self.best_ant.fitness():
+                self.best_ant = best_ant
+
+    def place_queens(self, ant):
+        for col in range(self.n):
+            self.place_queen(ant, col)
+
+    def place_queen(self, ant, col):
+        probs = self.pheromone[col] ** self.alpha * \
+            (1 / (np.arange(self.n) + 1)) ** self.beta
+        probs /= probs.sum()
+        row = np.random.choice(range(self.n), p=probs)
+        ant.position[col] = row
+        if row in ant.unplaced:
+            ant.unplaced.remove(row)
+
+    def update_pheromone(self, ants):
+        pheromone_delta = np.zeros((self.n, self.n))
+        for ant in ants:
+            fitness = ant.fitness()
+            for i in range(self.n):
+                pheromone_delta[i, ant.position[i]] += self.Q / fitness
+        self.pheromone *= (1 - self.evaporation_rate)
+        self.pheromone += pheromone_delta
+
+    def tsp(self, dist, max_iter):
+        # Inicialização dos feromônios
+        n = dist.shape[0]
+        tau = np.ones((n, n))
+
+        # Loop principal do algoritmo
+        best_cost = np.inf
+        best_solution = None
+        for it in range(max_iter):
+            # Inicialização das formigas
+            solutions = []
+            for ant in range(self.num_ants):
+                solution = [np.random.randint(n)]
+                visited = set(solution)
+                for _ in range(n-1):
+                    p = tau[solution[-1], :] ** self.alpha * \
+                        (1.0 / (dist[solution[-1], :] + 1e-10)) ** self.beta
+                    p[list(visited)] = 0.0
+                    if np.random.rand() < self.Q:
+                        next_node = np.argmax(p)
+                    else:
+                        p = p / p.sum()
+                        next_node = np.random.choice(range(n), p=p)
+                    solution.append(next_node)
+                    visited.add(next_node)
+                solutions.append(solution)
+
+            # Atualização dos feromônios
+            costs = np.array([sum(dist[solution[i], solution[i+1]] for i in range(n-1)) +
+                              dist[solution[-1], solution[0]] for solution in solutions])
+            if costs.min() < best_cost:
+                best_cost = costs.min()
+                best_solution = solutions[np.argmin(costs)]
+            pheromone_delta = np.zeros((n, n))
+            for solution in solutions:
+                for i in range(n-1):
+                    pheromone_delta[solution[i], solution[i+1]
+                                    ] += 1.0 / costs[solutions.index(solution)]
+                pheromone_delta[solution[-1], solution[0]
                                 ] += 1.0 / costs[solutions.index(solution)]
-            pheromone_delta[solution[-1], solution[0]
-                            ] += 1.0 / costs[solutions.index(solution)]
-        tau = (1 - rho) * tau + rho * pheromone_delta
+            tau = (1 - self.evaporation_rate) * tau + \
+                self.evaporation_rate * pheromone_delta
 
-    return best_solution, best_cost
+        return best_solution, best_cost
 
 
 def main():
+    n = 8
+    num_ants = 10
+    alpha = 1
+    beta = 5
+    evaporation_rate = 0.5
+    Q = 100
+
+    print("N rainhas: ")
+
+    start_time = time.time()
+    solver = AntSystem(n, num_ants, alpha, beta, evaporation_rate, Q)
+    solver.run(100)
+    end_time = time.time()
+    tempo_de_execução = end_time - start_time
+
+    print("Melhor solução: ", solver.best_ant.position)
+    print("Número de conflitos: ", solver.best_ant.fitness())
+    print("Tempo de execução:", tempo_de_execução)
+
     dist = np.array([[0, 69, 12, 56, 57, 98, 21, 18, 37, 12, 11, 84, 76, 69, 45, 17, 73, 94, 26, 25],
                      [69, 0, 60, 44, 24, 80, 43, 88, 75, 79, 12,
                          65, 28, 11, 47, 16, 78, 41, 42, 23],
@@ -89,11 +173,9 @@ def main():
 
     print("\nMatriz de distancias: ")
     print(dist)
-
-    # Chame a função ant_system_tsp para encontrar a melhor solução
+    # Chame a função tsp para encontrar a melhor solução
     start_time = time.time()
-    best_solution, best_cost = ant_system_tsp(
-        dist, ants=10, max_iter=100, rho=0.5, alpha=1, beta=5, q0=0.9)
+    best_solution, best_cost = solver.tsp(dist, 100)
     end_time = time.time()
 
     tempo_de_execução = end_time - start_time
